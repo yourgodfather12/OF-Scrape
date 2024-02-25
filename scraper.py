@@ -1,89 +1,79 @@
-import requests
+import os
 import json
-import logging
-import csv
-import threading
+import requests
 from bs4 import BeautifulSoup
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
-
-logging.basicConfig(level=logging.INFO)
+from PySide6.QtWidgets import QMessageBox
 
 
-def load_auth_token():
-    """Load authentication token from auth.json."""
-    try:
-        with open("auth.json", "r") as auth_file:
-            auth_data = json.load(auth_file)
-            return auth_data.get("auth", {}).get("app-token")
-    except FileNotFoundError:
-        logging.error("Auth token file not found.")
-        return None
-    except json.JSONDecodeError:
-        logging.error("Failed to decode auth token file.")
-        return None
+class Scraper:
+    def __init__(self):
+        self.usernames = []
+        self.media_urls = []
 
+    def scrape_usernames(self, url, headers):
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                self.usernames = [user.text for user in soup.find_all(class_='username')]
+            else:
+                print(f"Failed to fetch URL: {url}. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error scraping usernames: {e}")
 
-def scrape_usernames(url, headers, progress_callback=None):
-    """Scrape usernames from the specified URL."""
-    try:
-        # Create a session with retry logic
-        session = requests.Session()
-        retries = Retry(total=5, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
-        session.mount("https://", HTTPAdapter(max_retries=retries))
+    def scrape_media(self, url, headers):
+        try:
+            response = requests.get(url, headers=headers)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.content, 'html.parser')
+                self.media_urls = [media['src'] for media in soup.find_all('img', class_='media')]
+            else:
+                print(f"Failed to fetch URL: {url}. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error scraping media: {e}")
 
-        # Send a GET request to the URL with headers
-        response = session.get(url, headers=headers)
-        response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
+    def download_media(self, url, output_dir):
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                filename = os.path.basename(url)
+                with open(os.path.join(output_dir, filename), 'wb') as file:
+                    file.write(response.content)
+                print(f"Downloaded: {url}")
+            else:
+                print(f"Failed to download {url}. Status code: {response.status_code}")
+        except Exception as e:
+            print(f"Error downloading {url}: {e}")
 
-        # Parse the HTML content
-        soup = BeautifulSoup(response.content, "html.parser")
-
-        # Find all elements matching the specified selector
-        usernames = soup.select(
-            "#content > div.l-container > div.l-main-content.m-r-side > div.g-sides-gaps.g-page-content > div.b-grid-users > div > div > div.vue-recycle-scroller__item-wrapper > div > div > div > div > div.b-profile__user.m-inside-modelcard > div > div.b-profile__names.mw-0 > div:nth-child(2) > a > div")
-
-        # Extract and return the usernames
-        scraped_usernames = [username.text.strip() for username in usernames]
-
-        # Call progress callback if provided
-        if progress_callback:
-            progress_callback(len(scraped_usernames))
-
-        return scraped_usernames
-    except requests.RequestException as e:
-        logging.error(f"Failed to scrape usernames: {e}")
-        return []
-
-
-def save_usernames(usernames, output_file, format='txt'):
-    """Save usernames to a file."""
-    try:
-        if format == 'txt':
-            with open(output_file, "w") as file:
-                for username in usernames:
-                    file.write(username + "\n")
-        elif format == 'csv':
-            with open(output_file, "w", newline='') as csvfile:
-                writer = csv.writer(csvfile)
-                writer.writerow(["Username"])
-                for username in usernames:
-                    writer.writerow([username])
-        elif format == 'json':
-            with open(output_file, "w") as jsonfile:
-                json.dump(usernames, jsonfile, indent=4)
-        else:
-            logging.error("Invalid format specified for saving.")
+    def save_data(self, output_dir, data, format):
+        try:
+            if format == "text":
+                with open(os.path.join(output_dir, "scraped_data.txt"), "w") as file:
+                    file.write("\n".join(data))
+            elif format == "json":
+                with open(os.path.join(output_dir, "scraped_data.json"), "w") as file:
+                    json.dump(data, file, indent=4)
+            else:
+                return False
+            return True
+        except Exception as e:
+            print(f"Error saving data: {e}")
             return False
 
-        logging.info(f"Usernames saved to {output_file}")
-        return True
-    except IOError as e:
-        logging.error(f"Failed to save usernames: {e}")
-        return False
+    def load_auth_info(self):
+        try:
+            with open("auth.json", "r") as file:
+                auth_info = json.load(file)
+            return auth_info
+        except Exception as e:
+            print(f"Error loading auth info: {e}")
+            return None
 
+    def save_auth_info(self, auth_info):
+        try:
+            with open("auth.json", "w") as file:
+                json.dump(auth_info, file, indent=4)
+            print("Authentication info saved.")
+        except Exception as e:
+            print(f"Error saving auth info: {e}")
 
-def print_usernames(usernames):
-    """Print usernames to the console."""
-    for username in usernames:
-        print(username)
